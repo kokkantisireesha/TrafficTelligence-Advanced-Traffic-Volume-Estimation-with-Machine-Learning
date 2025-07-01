@@ -1,0 +1,34 @@
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import OneHotEncoder
+import joblib
+
+# Create sample data with all possible categorical values
+data = {
+    'weather': ['clear', 'cloudy', 'rain', 'snow', 'clear', 'cloudy'],
+    'road_type': ['highway', 'arterial', 'residential', 'highway', 'arterial', 'residential'],
+    'near_intersection': ['yes', 'no', 'yes', 'no', 'yes', 'no']
+}
+df = pd.DataFrame(data)
+
+# Initialize and fit the encoder
+encoder = OneHotEncoder(handle_unknown='ignore', sparse_output=False)
+encoder.fit(df[['weather', 'road_type', 'near_intersection']])
+
+# Save the encoder
+joblib.dump(encoder, 'encoder.pkl')
+
+# Test loading and transformation
+loaded_encoder = joblib.load('encoder.pkl')
+sample_data = pd.DataFrame({
+    'weather': ['rain'],
+    'road_type': ['highway'],
+    'near_intersection': ['yes']
+})
+
+encoded_data = loaded_encoder.transform(sample_data)
+feature_names = loaded_encoder.get_feature_names_out(['weather', 'road_type', 'near_intersection'])
+
+print("Encoder created successfully!")
+print("Feature names:", feature_names)
+print("Encoded sample:", encoded_data)
