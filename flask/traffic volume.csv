@@ -1,0 +1,188 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+import joblib
+import warnings
+warnings.filterwarnings('ignore')
+
+# Load and explore the dataset
+print("Loading and exploring traffic volume data...")
+df = pd.read_csv('traffic_volume.csv')
+
+# Display basic information
+print(f"\nDataset Shape: {df.shape}")
+print("\nFirst 5 rows:")
+print(df.head())
+print("\nData Summary:")
+print(df.describe())
+print("\nMissing Values:")
+print(df.isnull().sum())
+
+# Convert date_time to datetime format
+df['date_time'] = pd.to_datetime(df['date_time'])
+
+# Feature engineering
+df['hour'] = df['date_time'].dt.hour
+df['day_of_week'] = df['date_time'].dt.dayofweek
+df['month'] = df['date_time'].dt.month
+df['is_weekend'] = df['day_of_week'].apply(lambda x: 1 if x >= 5 else 0)
+df['is_rush_hour'] = df['hour'].apply(lambda x: 1 if (7 <= x <= 9) or (16 <= x <= 18) else 0)
+
+# Visualize data
+plt.figure(figsize=(15, 12))
+
+# Traffic volume over time
+plt.subplot(3, 2, 1)
+df.set_index('date_time')['traffic_volume'].resample('D').mean().plot()
+plt.title('Daily Traffic Volume')
+plt.ylabel('Vehicles per hour')
+
+# Traffic by hour of day
+plt.subplot(3, 2, 2)
+sns.boxplot(x='hour', y='traffic_volume', data=df)
+plt.title('Traffic Volume by Hour of Day')
+
+# Traffic by day of week
+plt.subplot(3, 2, 3)
+sns.boxplot(x='day_of_week', y='traffic_volume', data=df)
+plt.title('Traffic Volume by Day of Week')
+
+# Traffic by weather
+plt.subplot(3, 2, 4)
+sns.boxplot(x='weather_main', y='traffic_volume', data=df)
+plt.title('Traffic Volume by Weather Condition')
+plt.xticks(rotation=45)
+
+# Correlation heatmap
+plt.subplot(3, 2, 5)
+corr = df[['traffic_volume', 'temp', 'rain_1h', 'snow_1h', 'clouds_all']].corr()
+sns.heatmap(corr, annot=True, cmap='coolwarm')
+plt.title('Feature Correlation Matrix')
+
+# Feature importance (placeholder)
+plt.subplot(3, 2, 6)
+importance = pd.Series([0.35, 0.25, 0.15, 0.10, 0.08, 0.07], 
+                      index=['Hour', 'Day of Week', 'Temperature', 'Weather', 'Month', 'Holiday'])
+importance.sort_values().plot(kind='barh')
+plt.title('Feature Importance (Estimated)')
+plt.xlabel('Importance Score')
+
+plt.tight_layout()
+plt.savefig('traffic_analysis.png')
+plt.show()
+
+# Preprocessing and model building
+print("\nPreprocessing data and building prediction model...")
+
+# Define features and target
+features = df[['holiday', 'temp', 'rain_1h', 'snow_1h', 'weather_main', 
+               'month', 'hour', 'day_of_week', 'is_weekend', 'is_rush_hour']]
+target = df['traffic_volume']
+
+# Split data
+X_train, X_test, y_train, y_test = train_test_split(
+    features, target, test_size=0.2, random_state=42
+)
+
+# Preprocessing pipeline
+numeric_features = ['temp', 'rain_1h', 'snow_1h']
+categorical_features = ['holiday', 'weather_main', 'month', 'hour', 'day_of_week']
+
+preprocessor = ColumnTransformer(
+    transformers=[
+        ('num', StandardScaler(), numeric_features),
+        ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features)
+    ])
+
+# Create pipeline
+model = Pipeline(steps=[
+    ('preprocessor', preprocessor),
+    ('regressor', RandomForestRegressor(n_estimators=100, random_state=42))
+])
+
+# Train model
+model.fit(X_train, y_train)
+
+# Evaluate model
+y_pred = model.predict(X_test)
+mse = mean_squared_error(y_test, y_pred)
+rmse = np.sqrt(mse)
+r2 = r2_score(y_test, y_pred)
+
+print(f"\nModel Evaluation:")
+print(f"RMSE: {rmse:.2f}")
+print(f"R² Score: {r2:.2f}")
+
+# Save model
+joblib.dump(model, 'traffic_volume_model.pkl')
+print("\nModel saved as 'traffic_volume_model.pkl'")
+
+# Create prediction application
+class TrafficVolumePredictor:
+    def __init__(self, model_path):
+        self.model = joblib.load(model_path)
+        self.weather_options = ['Clear', 'Clouds', 'Rain', 'Snow', 'Mist', 'Drizzle']
+        self.holiday_options = ['None', 'Christmas', 'New Year', 'Thanksgiving', 'Independence Day']
+        
+    def predict(self, inputs):
+        """Predict traffic volume based on input features"""
+        # Create input DataFrame
+        input_df = pd.DataFrame([inputs])
+        
+        # Predict
+        prediction = self.model.predict(input_df)[0]
+        return max(0, int(prediction))  # Ensure non-negative value
+    
+    def get_feature_importance(self):
+        """Get feature importances from the model"""
+        # Extract feature names from the preprocessor
+        numeric_features = ['temp', 'rain_1h', 'snow_1h']
+        categorical_features = ['holiday', 'weather_main', 'month', 'hour', 'day_of_week']
+        
+        # Get one-hot encoded feature names
+        ohe = self.model.named_steps['preprocessor'].named_transformers_['cat']
+        cat_feature_names = ohe.get_feature_names_out(categorical_features)
+        
+        # Combine all feature names
+        all_feature_names = numeric_features + list(cat_feature_names)
+        
+        # Get feature importances
+        importances = self.model.named_steps['regressor'].feature_importances_
+        
+        # Sort by importance
+        feature_importance = pd.Series(importances, index=all_feature_names)
+        return feature_importance.sort_values(ascending=False).head(10)
+
+# Example usage
+if __name__ == "__main__":
+    print("\nCreating traffic volume predictor...")
+    predictor = TrafficVolumePredictor('traffic_volume_model.pkl')
+    
+    # Example input
+    example_input = {
+        'holiday': 'None',
+        'temp': 22.5,
+        'rain_1h': 0.0,
+        'snow_1h': 0.0,
+        'weather_main': 'Clouds',
+        'month': 6,
+        'hour': 17,
+        'day_of_week': 2,  # Tuesday
+        'is_weekend': 0,
+        'is_rush_hour': 1
+    }
+    
+    prediction = predictor.predict(example_input)
+    print(f"\nPrediction for example input: {prediction} vehicles/hour")
+    
+    # Show feature importance
+    print("\nTop 10 Feature Importances:")
+    print(predictor.get_feature_importance())
+        
